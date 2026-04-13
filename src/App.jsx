@@ -69,23 +69,42 @@ export default function App() {
   const [sqlResult, setSqlResult] = useState(null);
   const [sqlError, setSqlError] = useState(null);
 
-  // --- NOVOS ESTADOS PARA EDIÇÃO DE PRODUTOS ---
   const [produtoEditando, setProdutoEditando] = useState(null);
   const [editNome, setEditNome] = useState('');
   const [editPreco, setEditPreco] = useState('');
 
+  // --- Limpeza agressiva ao detectar nova sessão e logout ---
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) carregarPerfil(session.user.id);
+      if (session) {
+        setEndereco({ cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '' });
+        setCarrinho([]);
+        setHistorico([]);
+        carregarPerfil(session.user.id);
+      }
     });
+
     supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session) carregarPerfil(session.user.id);
+      if (session) {
+        setEndereco({ cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '' });
+        setCarrinho([]);
+        setHistorico([]);
+        carregarPerfil(session.user.id);
+      } else {
+        setUserProfile(null);
+        setEndereco({ cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '' });
+        setCarrinho([]);
+        setHistorico([]);
+        setAbaAtiva('estoque');
+      }
     });
   }, []);
 
   async function carregarPerfil(uid) {
+    setEndereco({ cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '' });
+
     const { data } = await supabase.from('perfis').select('*').eq('id', uid).single();
     setUserProfile(data);
     
@@ -141,6 +160,11 @@ export default function App() {
     
     setQtdInputs({ ...qtdInputs, [produto.id]: '' });
     alert("Adicionado ao carrinho!");
+  }
+
+  function removerDoCarrinho(idProduto) {
+    const novoCarrinho = carrinho.filter(item => item.produto.id !== idProduto);
+    setCarrinho(novoCarrinho);
   }
 
   async function finalizarCompra() {
@@ -219,7 +243,6 @@ export default function App() {
     else setSqlResult(data || []);
   }
 
-  // --- NOVAS FUNÇÕES DE EDIÇÃO ---
   const abrirModalEdicao = (produto) => {
     setProdutoEditando(produto);
     setEditNome(produto.nome);
@@ -306,14 +329,14 @@ export default function App() {
                 </div>
 
                 <div className="flex-grow">
-                  {/* ALTERADO AQUI: Nome do produto e botão de Editar juntos */}
                   <div className="flex justify-between items-start mb-3">
                     <h2 className="text-xl font-bold text-slate-800">{p.nome}</h2>
                     {userProfile.is_admin && (
                       <button 
-                        onClick={() => abrirModalEdicao(p)}
+                        onClick={() => abrirModalEdicao(p)} 
+                        className="text-[10px] uppercase tracking-wider bg-slate-100 text-slate-600 px-2 py-1 rounded-md hover:bg-slate-200 transition-colors border border-slate-200 font-black"
                       >
-                        ✏️
+                        Editar
                       </button>
                     )}
                   </div>
@@ -356,14 +379,36 @@ export default function App() {
         {/* CARRINHO */}
         {abaAtiva === 'carrinho' && !userProfile.is_admin && (
           <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm max-w-2xl">
-            <h2 className="text-2xl font-black mb-6">Seu Carrinho</h2>
+            
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-black text-slate-800">Seu Carrinho</h2>
+              {carrinho.length > 0 && (
+                <button 
+                  onClick={() => setCarrinho([])} 
+                  className="text-xs text-red-500 font-bold hover:underline transition-all"
+                >
+                  Esvaziar Carrinho
+                </button>
+              )}
+            </div>
+
             {carrinho.length === 0 ? <p className="text-slate-500 font-medium">O carrinho está vazio.</p> : (
               <div className="space-y-6">
                 <ul className="divide-y divide-slate-100 border-b border-slate-100 pb-4">
                   {carrinho.map((item, idx) => (
-                    <li key={idx} className="py-4 flex justify-between font-bold text-slate-700">
-                      <span>{item.qtd}x {item.produto.nome}</span>
-                      <span>R$ {(item.produto.preco * item.qtd).toFixed(2)}</span>
+                    <li key={idx} className="py-4 flex justify-between items-center font-bold text-slate-700 gap-4">
+                      <span className="flex-1">{item.qtd}x {item.produto.nome}</span>
+                      
+                      <div className="flex items-center gap-4">
+                        <span>R$ {(item.produto.preco * item.qtd).toFixed(2)}</span>
+                        
+                        <button 
+                          onClick={() => removerDoCarrinho(item.produto.id)}
+                          className="text-[10px] text-red-500 border border-red-200 hover:bg-red-50 px-2 py-1 rounded uppercase tracking-wider transition-colors"
+                        >
+                          Remover
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -547,7 +592,7 @@ export default function App() {
 
       </div>
 
-      {/* --- MODAL DE EDIÇÃO DE PRODUTO --- */}
+      {/* MODAL DE EDIÇÃO DE PRODUTO */}
       {produtoEditando && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl border border-slate-200">
