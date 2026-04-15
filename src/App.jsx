@@ -26,6 +26,8 @@ function Login() {
     setLoading(false);
   };
 
+  
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4 font-sans">
       <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border border-slate-200">
@@ -59,6 +61,12 @@ export default function App() {
   
   const [carrinho, setCarrinho] = useState([]);
   
+  // --- NOVOS ESTADOS PARA O PAGAMENTO ---
+  const [etapaCarrinho, setEtapaCarrinho] = useState(1); // 1 = Endereço, 2 = Pagamento
+  const [metodoPagamento, setMetodoPagamento] = useState('');
+  const [processandoPagamento, setProcessandoPagamento] = useState(false);
+  // --------------------------------------
+
   const [endereco, setEndereco] = useState({
     cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: ''
   });
@@ -78,9 +86,7 @@ export default function App() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) {
-        setEndereco({ cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '' });
-        setCarrinho([]);
-        setHistorico([]);
+        resetarEstados();
         carregarPerfil(session.user.id);
       }
     });
@@ -88,19 +94,23 @@ export default function App() {
     supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session) {
-        setEndereco({ cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '' });
-        setCarrinho([]);
-        setHistorico([]);
+        resetarEstados();
         carregarPerfil(session.user.id);
       } else {
         setUserProfile(null);
-        setEndereco({ cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '' });
-        setCarrinho([]);
-        setHistorico([]);
+        resetarEstados();
         setAbaAtiva('estoque');
       }
     });
   }, []);
+
+  function resetarEstados() {
+    setEndereco({ cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '' });
+    setCarrinho([]);
+    setHistorico([]);
+    setEtapaCarrinho(1);
+    setMetodoPagamento('');
+  }
 
   async function carregarPerfil(uid) {
     setEndereco({ cep: '', rua: '', numero: '', complemento: '', bairro: '', cidade: '', uf: '' });
@@ -165,27 +175,61 @@ export default function App() {
   function removerDoCarrinho(idProduto) {
     const novoCarrinho = carrinho.filter(item => item.produto.id !== idProduto);
     setCarrinho(novoCarrinho);
+    if (novoCarrinho.length === 0) setEtapaCarrinho(1);
   }
 
-  async function finalizarCompra() {
+  function esvaziarCarrinho() {
+    setCarrinho([]);
+    setEtapaCarrinho(1);
+  }
+
+  // --- NOVA FUNÇÃO: Avançar para pagamento ---
+  function avancarParaPagamento() {
     if (!endereco.rua || !endereco.numero || !endereco.bairro || !endereco.cidade) {
       return alert("Preencha os campos principais do endereço (Rua, Número, Bairro e Cidade)!");
     }
+    setEtapaCarrinho(2);
+  }
+
+  // --- NOVA FUNÇÃO: Processar Pagamento e Finalizar ---
+  async function processarPagamento() {
+    if (!metodoPagamento) {
+      return alert("Por favor, selecione uma forma de pagamento.");
+    }
     
+    setProcessandoPagamento(true);
+
+    // Simulação do tempo de aprovação do banco/gateway
+    setTimeout(async () => {
+      await finalizarCompra();
+      setProcessandoPagamento(false);
+    }, 2000);
+  }
+
+  async function finalizarCompra() {
     await supabase.from('perfis').update({ endereco: JSON.stringify(endereco) }).eq('id', userProfile.id);
 
     for (let item of carrinho) {
       const { data: prodDB } = await supabase.from('produtos').select('quantidade').eq('id', item.produto.id).single();
       if (prodDB.quantidade >= item.qtd) {
         await supabase.from('produtos').update({ quantidade: prodDB.quantidade - item.qtd }).eq('id', item.produto.id);
+        
+        // --- ADICIONAMOS O METODO DE PAGAMENTO AQUI ---
         await supabase.from('historico').insert([{ 
-          produto_nome: item.produto.nome, tipo: 'COMPRA', quantidade: item.qtd, 
-          user_id: userProfile.id, usuario_email: userProfile.email 
+          produto_nome: item.produto.nome, 
+          tipo: 'COMPRA', 
+          quantidade: item.qtd, 
+          user_id: userProfile.id, 
+          usuario_email: userProfile.email,
+          metodo_pagamento: metodoPagamento 
         }]);
+        // ----------------------------------------------
       }
     }
     setCarrinho([]);
-    alert("Compra finalizada com sucesso!");
+    setEtapaCarrinho(1);
+    setMetodoPagamento('');
+    alert(`Compra finalizada com sucesso!\nMétodo: ${metodoPagamento}`);
     buscarDados();
     setAbaAtiva('historico');
   }
@@ -241,6 +285,56 @@ export default function App() {
     if (error) setSqlError(error.message);
     else if (data && data.error) setSqlError(data.error);
     else setSqlResult(data || []);
+  }
+
+  // Simula o tempo de processamento de um pagamento
+  function processarPagamento() {
+    if (!metodoPagamento) {
+      alert("Por favor, selecione um método de pagamento.");
+      return;
+    }
+    
+    setProcessandoPagamento(true);
+    
+    // Simula 2 segundos de carregamento antes de aprovar
+    setTimeout(() => {
+      setProcessandoPagamento(false);
+      finalizarCompra();
+    }, 2000);
+  }
+
+  // Efetiva a compra no banco de dados
+  async function finalizarCompra() {
+    // Salva o endereço no perfil do usuário
+    await supabase.from('perfis').update({ endereco: JSON.stringify(endereco) }).eq('id', userProfile.id);
+
+    // Percorre o carrinho descontando o estoque e gerando o histórico
+    for (let item of carrinho) {
+      const { data: prodDB } = await supabase.from('produtos').select('quantidade').eq('id', item.produto.id).single();
+      
+      if (prodDB.quantidade >= item.qtd) {
+        // Desconta do estoque
+        await supabase.from('produtos').update({ quantidade: prodDB.quantidade - item.qtd }).eq('id', item.produto.id);
+        
+        // Registra no histórico COM o método de pagamento
+        await supabase.from('historico').insert([{ 
+          produto_nome: item.produto.nome, 
+          tipo: 'COMPRA', 
+          quantidade: item.qtd, 
+          user_id: userProfile.id, 
+          usuario_email: userProfile.email,
+          metodo_pagamento: metodoPagamento 
+        }]);
+      }
+    }
+    
+    // Limpa os estados após a compra
+    setCarrinho([]);
+    setEtapaCarrinho(1);
+    setMetodoPagamento('');
+    alert(`Compra finalizada com sucesso via ${metodoPagamento}!`);
+    buscarDados();
+    setAbaAtiva('historico');
   }
 
   const abrirModalEdicao = (produto) => {
@@ -361,7 +455,7 @@ export default function App() {
                     />
                     {!userProfile.is_admin ? (
                       <button onClick={() => adicionarAoCarrinho(p)} className="flex-1 bg-indigo-600 text-white font-black uppercase tracking-widest rounded-xl hover:bg-indigo-700 transition-colors shadow-sm">
-                        Comprar
+                        ADD CARRINHO
                       </button>
                     ) : (
                       <button onClick={() => realizarReposicao(p)} className="flex-1 bg-emerald-100 text-emerald-700 font-black uppercase tracking-widest rounded-xl border border-emerald-200 hover:bg-emerald-200 transition-colors">
@@ -376,15 +470,17 @@ export default function App() {
           </div>
         )}
 
-        {/* CARRINHO */}
+        {/* CARRINHO E PAGAMENTO */}
         {abaAtiva === 'carrinho' && !userProfile.is_admin && (
           <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm max-w-2xl">
             
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-black text-slate-800">Seu Carrinho</h2>
-              {carrinho.length > 0 && (
+              <h2 className="text-2xl font-black text-slate-800">
+                {etapaCarrinho === 1 ? 'Seu Carrinho' : 'Pagamento'}
+              </h2>
+              {carrinho.length > 0 && etapaCarrinho === 1 && (
                 <button 
-                  onClick={() => setCarrinho([])} 
+                  onClick={esvaziarCarrinho} 
                   className="text-xs text-red-500 font-bold hover:underline transition-all"
                 >
                   Esvaziar Carrinho
@@ -393,63 +489,117 @@ export default function App() {
             </div>
 
             {carrinho.length === 0 ? <p className="text-slate-500 font-medium">O carrinho está vazio.</p> : (
-              <div className="space-y-6">
-                <ul className="divide-y divide-slate-100 border-b border-slate-100 pb-4">
-                  {carrinho.map((item, idx) => (
-                    <li key={idx} className="py-4 flex justify-between items-center font-bold text-slate-700 gap-4">
-                      <span className="flex-1">{item.qtd}x {item.produto.nome}</span>
+              <>
+                {/* ETAPA 1: REVISÃO DOS ITENS E ENDEREÇO */}
+                {etapaCarrinho === 1 && (
+                  <div className="space-y-6">
+                    <ul className="divide-y divide-slate-100 border-b border-slate-100 pb-4">
+                      {carrinho.map((item, idx) => (
+                        <li key={idx} className="py-4 flex justify-between items-center font-bold text-slate-700 gap-4">
+                          <span className="flex-1">{item.qtd}x {item.produto.nome}</span>
+                          
+                          <div className="flex items-center gap-4">
+                            <span>R$ {(item.produto.preco * item.qtd).toFixed(2)}</span>
+                            
+                            <button 
+                              onClick={() => removerDoCarrinho(item.produto.id)}
+                              className="text-[10px] text-red-500 border border-red-200 hover:bg-red-50 px-2 py-1 rounded uppercase tracking-wider transition-colors"
+                            >
+                              Remover
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                    
+                    <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
+                      <h3 className="block text-sm font-bold text-slate-700 mb-4">Endereço de Entrega (Salvo automaticamente):</h3>
                       
-                      <div className="flex items-center gap-4">
-                        <span>R$ {(item.produto.preco * item.qtd).toFixed(2)}</span>
-                        
-                        <button 
-                          onClick={() => removerDoCarrinho(item.produto.id)}
-                          className="text-[10px] text-red-500 border border-red-200 hover:bg-red-50 px-2 py-1 rounded uppercase tracking-wider transition-colors"
-                        >
-                          Remover
-                        </button>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div className="md:col-span-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">CEP</label>
+                          <input name="cep" value={endereco.cep} onChange={handleEnderecoChange} placeholder="00000-000" className="w-full mt-1 p-3 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm" />
+                        </div>
+                        <div className="md:col-span-3">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Rua / Avenida</label>
+                          <input name="rua" value={endereco.rua} onChange={handleEnderecoChange} placeholder="Ex: Rua das Flores" className="w-full mt-1 p-3 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm" />
+                        </div>
+                        <div className="md:col-span-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Número</label>
+                          <input name="numero" value={endereco.numero} onChange={handleEnderecoChange} placeholder="Ex: 123" className="w-full mt-1 p-3 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm" />
+                        </div>
+                        <div className="md:col-span-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Complemento</label>
+                          <input name="complemento" value={endereco.complemento} onChange={handleEnderecoChange} placeholder="Apto 12" className="w-full mt-1 p-3 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm" />
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Bairro</label>
+                          <input name="bairro" value={endereco.bairro} onChange={handleEnderecoChange} placeholder="Centro" className="w-full mt-1 p-3 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm" />
+                        </div>
+                        <div className="md:col-span-3">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Cidade</label>
+                          <input name="cidade" value={endereco.cidade} onChange={handleEnderecoChange} placeholder="São Paulo" className="w-full mt-1 p-3 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm" />
+                        </div>
+                        <div className="md:col-span-1">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">UF</label>
+                          <input name="uf" value={endereco.uf} onChange={handleEnderecoChange} placeholder="SP" maxLength="2" className="w-full mt-1 p-3 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm uppercase" />
+                        </div>
                       </div>
-                    </li>
-                  ))}
-                </ul>
-                
-                <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
-                  <h3 className="block text-sm font-bold text-slate-700 mb-4">Endereço de Entrega (Salvo automaticamente):</h3>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="md:col-span-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">CEP</label>
-                      <input name="cep" value={endereco.cep} onChange={handleEnderecoChange} placeholder="00000-000" className="w-full mt-1 p-3 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm" />
                     </div>
-                    <div className="md:col-span-3">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Rua / Avenida</label>
-                      <input name="rua" value={endereco.rua} onChange={handleEnderecoChange} placeholder="Ex: Rua das Flores" className="w-full mt-1 p-3 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm" />
+
+                    <button onClick={avancarParaPagamento} className="w-full bg-emerald-500 text-white py-4 rounded-xl font-black text-lg shadow-md hover:bg-emerald-600 transition-colors">
+                      Ir para Pagamento
+                    </button>
+                  </div>
+                )}
+
+                {/* ETAPA 2: ESCOLHA DO MÉTODO DE PAGAMENTO */}
+                {etapaCarrinho === 2 && (
+                  <div className="space-y-6 animate-fade-in">
+                    <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
+                      <h3 className="block text-sm font-bold text-slate-700 mb-4 uppercase tracking-wider">Como deseja pagar?</h3>
+                      
+                      <div className="space-y-3">
+                        {['Pix', 'Cartão de Crédito', 'Boleto'].map((metodo) => (
+                          <label key={metodo} className={`flex items-center p-4 border rounded-xl cursor-pointer transition-all ${metodoPagamento === metodo ? 'border-indigo-500 bg-indigo-50/50' : 'border-slate-200 hover:border-indigo-300 bg-white'}`}>
+                            <input 
+                              type="radio" 
+                              name="pagamento" 
+                              value={metodo} 
+                              checked={metodoPagamento === metodo}
+                              onChange={(e) => setMetodoPagamento(e.target.value)}
+                              className="w-4 h-4 text-indigo-600 focus:ring-indigo-500 border-gray-300"
+                            />
+                            <span className="ml-3 font-semibold text-slate-700">{metodo}</span>
+                          </label>
+                        ))}
+                      </div>
                     </div>
-                    <div className="md:col-span-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Número</label>
-                      <input name="numero" value={endereco.numero} onChange={handleEnderecoChange} placeholder="Ex: 123" className="w-full mt-1 p-3 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm" />
-                    </div>
-                    <div className="md:col-span-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Complemento</label>
-                      <input name="complemento" value={endereco.complemento} onChange={handleEnderecoChange} placeholder="Apto 12" className="w-full mt-1 p-3 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm" />
-                    </div>
-                    <div className="md:col-span-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Bairro</label>
-                      <input name="bairro" value={endereco.bairro} onChange={handleEnderecoChange} placeholder="Centro" className="w-full mt-1 p-3 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm" />
-                    </div>
-                    <div className="md:col-span-3">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Cidade</label>
-                      <input name="cidade" value={endereco.cidade} onChange={handleEnderecoChange} placeholder="São Paulo" className="w-full mt-1 p-3 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm" />
-                    </div>
-                    <div className="md:col-span-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">UF</label>
-                      <input name="uf" value={endereco.uf} onChange={handleEnderecoChange} placeholder="SP" maxLength="2" className="w-full mt-1 p-3 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm uppercase" />
+
+                    <div className="flex gap-4">
+                      <button 
+                        onClick={() => setEtapaCarrinho(1)} 
+                        disabled={processandoPagamento}
+                        className="w-1/3 bg-white text-slate-600 py-4 rounded-xl border border-slate-200 font-bold text-lg hover:bg-slate-50 transition-colors disabled:opacity-50"
+                      >
+                        Voltar
+                      </button>
+                      <button 
+                        onClick={processarPagamento} 
+                        disabled={processandoPagamento || !metodoPagamento}
+                        className="w-2/3 bg-emerald-500 text-white py-4 rounded-xl font-black text-lg shadow-md hover:bg-emerald-600 transition-colors disabled:opacity-50 flex justify-center items-center gap-2"
+                      >
+                        {processandoPagamento ? (
+                          <>
+                            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            Processando...
+                          </>
+                        ) : 'Confirmar Pagamento'}
+                      </button>
                     </div>
                   </div>
-                </div>
-
-                <button onClick={finalizarCompra} className="w-full bg-emerald-500 text-white py-4 rounded-xl font-black text-lg shadow-md hover:bg-emerald-600 transition-colors">Finalizar Compra</button>
-              </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -463,31 +613,36 @@ export default function App() {
                 <button onClick={limparHistorico} className="bg-white text-red-500 px-4 py-2 rounded-lg font-bold text-xs border border-red-200 hover:bg-red-50 transition-colors shadow-sm">Limpar Histórico</button>
               )}
             </div>
-            <table className="w-full text-left text-sm">
-              <thead className="bg-white border-b border-slate-100">
-                <tr>
-                  <th className="p-4 font-bold text-slate-400">Produto</th>
-                  <th className="p-4 font-bold text-slate-400">Tipo</th>
-                  <th className="p-4 font-bold text-slate-400">Qtd</th>
-                  <th className="p-4 font-bold text-slate-400">Usuário</th>
-                  <th className="p-4 font-bold text-slate-400">Data</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {historico.length === 0 ? <tr><td colSpan="5" className="p-8 text-center text-slate-400 font-medium">Nenhum registro encontrado.</td></tr> : null}
-                {historico.map(h => (
-                  <tr key={h.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="p-4 font-bold text-slate-700">{h.produto_nome}</td>
-                    <td className="p-4">
-                      <span className={`px-2.5 py-1 rounded-md text-[10px] font-black tracking-wide ${h.tipo === 'COMPRA' ? 'bg-orange-100 text-orange-600' : 'bg-emerald-100 text-emerald-600'}`}>{h.tipo}</span>
-                    </td>
-                    <td className="p-4 font-mono font-semibold text-slate-600">{h.quantidade}</td>
-                    <td className="p-4 font-medium text-slate-500">{h.usuario_email || 'Desconhecido'}</td>
-                    <td className="p-4 text-slate-400 text-xs font-medium">{new Date(h.criado_at).toLocaleString()}</td>
+            
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm min-w-[700px]">
+                <thead className="bg-white border-b border-slate-100">
+                  <tr>
+                    <th className="p-4 font-bold text-slate-400">Produto</th>
+                    <th className="p-4 font-bold text-slate-400">Tipo</th>
+                    <th className="p-4 font-bold text-slate-400">Qtd</th>
+                    <th className="p-4 font-bold text-slate-400">Pagamento</th>
+                    <th className="p-4 font-bold text-slate-400">Usuário</th>
+                    <th className="p-4 font-bold text-slate-400">Data</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {historico.length === 0 ? <tr><td colSpan="6" className="p-8 text-center text-slate-400 font-medium">Nenhum registro encontrado.</td></tr> : null}
+                  {historico.map(h => (
+                    <tr key={h.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-4 font-bold text-slate-700">{h.produto_nome}</td>
+                      <td className="p-4">
+                        <span className={`px-2.5 py-1 rounded-md text-[10px] font-black tracking-wide ${h.tipo === 'COMPRA' ? 'bg-orange-100 text-orange-600' : 'bg-emerald-100 text-emerald-600'}`}>{h.tipo}</span>
+                      </td>
+                      <td className="p-4 font-mono font-semibold text-slate-600">{h.quantidade}</td>
+                      <td className="p-4 font-medium text-slate-500">{h.metodo_pagamento || '-'}</td>
+                      <td className="p-4 font-medium text-slate-500">{h.usuario_email || 'Desconhecido'}</td>
+                      <td className="p-4 text-slate-400 text-xs font-medium">{new Date(h.criado_at).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
@@ -619,25 +774,14 @@ export default function App() {
                 />
               </div>
             </div>
-
-            <div className="flex gap-3 mt-8">
-              <button 
-                onClick={() => setProdutoEditando(null)} 
-                className="flex-1 bg-slate-100 text-slate-600 font-black uppercase tracking-widest rounded-xl py-3 hover:bg-slate-200 transition-colors text-[10px]"
-              >
-                Cancelar
-              </button>
-              <button 
-                onClick={salvarEdicaoProduto} 
-                className="flex-1 bg-indigo-600 text-white font-black uppercase tracking-widest rounded-xl py-3 hover:bg-indigo-700 transition-colors text-[10px] shadow-sm"
-              >
-                Salvar Alterações
-              </button>
+            
+            <div className="mt-6 flex gap-3">
+              <button onClick={() => setProdutoEditando(null)} className="flex-1 bg-slate-100 text-slate-600 py-3 rounded-xl font-bold hover:bg-slate-200 transition-colors">Cancelar</button>
+              <button onClick={salvarEdicaoProduto} className="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-bold hover:bg-indigo-700 transition-colors shadow-sm">Salvar</button>
             </div>
           </div>
         </div>
       )}
-      
     </div>
   );
 }
