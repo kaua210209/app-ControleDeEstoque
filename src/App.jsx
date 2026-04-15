@@ -1,6 +1,21 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './supabaseClient';
+import Swal from 'sweetalert2';
 
+
+// Sobrescreve o alerta padrão do navegador
+window.alert = function(mensagem) {
+  Swal.fire({
+    title: 'Aviso',
+    text: mensagem,
+    icon: 'info',
+    confirmButtonColor: '#6366f1', // indigo-500
+    confirmButtonText: 'OK',
+    customClass: {
+      popup: 'rounded-2xl border border-slate-100 shadow-xl'
+    }
+  });
+};
 // --- TELA DE LOGIN E CADASTRO ---
 function Login() {
   const [modo, setModo] = useState('login');
@@ -290,7 +305,16 @@ export default function App() {
   // Simula o tempo de processamento de um pagamento
   function processarPagamento() {
     if (!metodoPagamento) {
-      alert("Por favor, selecione um método de pagamento.");
+      Swal.fire({
+        title: 'Atenção!',
+        text: 'Por favor, selecione um método de pagamento antes de continuar.',
+        icon: 'warning',
+        confirmButtonColor: '#6366f1', // Cor indigo-500 do Tailwind
+        confirmButtonText: 'Entendi',
+        customClass: {
+          popup: 'rounded-2xl border border-slate-100 shadow-xl'
+        }
+      });
       return;
     }
     
@@ -332,7 +356,18 @@ export default function App() {
     setCarrinho([]);
     setEtapaCarrinho(1);
     setMetodoPagamento('');
-    alert(`Compra finalizada com sucesso via ${metodoPagamento}!`);
+    Swal.fire({
+      title: 'Sucesso!',
+      text: `Compra finalizada com sucesso via ${metodoPagamento}!`,
+      icon: 'success',
+      confirmButtonColor: '#10b981', // Cor do botão (emerald-500 do Tailwind que você já usa)
+      confirmButtonText: 'Continuar',
+      background: '#ffffff',
+      customClass: {
+      title: 'text-slate-800 font-bold',
+      popup: 'rounded-2xl border border-slate-100 shadow-xl'
+  }
+});
     buscarDados();
     setAbaAtiva('historico');
   }
