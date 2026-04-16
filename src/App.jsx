@@ -88,7 +88,7 @@ export default function App() {
   
   const [qtdInputs, setQtdInputs] = useState({});
 
-  const [sqlQuery, setSqlQuery] = useState("SELECT * FROM produtos;");
+  const [sqlQuery, setSqlQuery] = useState("SELECT * FROM produtos");
   const [sqlResult, setSqlResult] = useState(null);
   const [sqlError, setSqlError] = useState(null);
 
@@ -327,6 +327,68 @@ export default function App() {
     }, 2000);
   }
 
+  // COLOQUE ESTA FUNÇÃO JUNTO COM AS OUTRAS, ANTES DO RETURN:
+
+  async function abrirModalAdicionarProduto() {
+    const { value: formValues } = await Swal.fire({
+      title: 'Adicionar Novo Produto',
+      html: `
+        <div class="flex flex-col gap-4 mt-4">
+          <input id="swal-nome" class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all" placeholder="Nome do Produto (Ex: Teclado RGB)">
+          <input id="swal-preco" type="number" step="0.01" class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all" placeholder="Preço (Ex: 150.00)">
+          <input id="swal-qtd" type="number" class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all" placeholder="Quantidade Inicial (Ex: 10)">
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonColor: '#6366f1', // indigo-500
+      cancelButtonColor: '#94a3b8',  // slate-400
+      confirmButtonText: 'Salvar Produto',
+      cancelButtonText: 'Cancelar',
+      customClass: {
+        popup: 'rounded-2xl border border-slate-100 shadow-xl'
+      },
+      preConfirm: () => {
+        const nome = document.getElementById('swal-nome').value;
+        const preco = document.getElementById('swal-preco').value;
+        const qtd = document.getElementById('swal-qtd').value;
+        
+        if (!nome || !preco || !qtd) {
+          Swal.showValidationMessage('Por favor, preencha todos os campos!');
+        }
+        return { nome, preco, qtd };
+      }
+    });
+
+    if (formValues) {
+      try {
+        // Envia para o Supabase
+        const { error } = await supabase.from('produtos').insert([
+          { 
+            nome: formValues.nome, 
+            preco: parseFloat(formValues.preco), 
+            quantidade: parseInt(formValues.qtd, 10) 
+          }
+        ]);
+
+        if (error) throw error;
+
+        // Avisa que deu certo e atualiza a tela
+        Swal.fire({
+          title: 'Sucesso!',
+          text: 'Produto adicionado com sucesso.',
+          icon: 'success',
+          confirmButtonColor: '#10b981',
+          customClass: { popup: 'rounded-2xl border border-slate-100 shadow-xl' }
+        });
+        
+        buscarDados(); // Recarrega a lista de produtos na tela
+        
+      } catch (err) {
+        Swal.fire('Erro!', 'Não foi possível adicionar o produto: ' + err.message, 'error');
+      }
+    }
+  }
+
   // Efetiva a compra no banco de dados
   async function finalizarCompra() {
     // Salva o endereço no perfil do usuário
@@ -442,6 +504,8 @@ export default function App() {
         {/* PRODUTOS */}
         {abaAtiva === 'estoque' && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            
+            {/* LISTA DOS PRODUTOS EXISTENTES */}
             {produtos.map(p => {
               const isEstoqueBaixo = p.quantidade <= 5; 
               
@@ -502,6 +566,21 @@ export default function App() {
 
               </div>
             )})}
+            
+            {/* 👇 CARTÃO DE ADICIONAR NOVO PRODUTO ENTRA AQUI 👇 */}
+            {userProfile?.is_admin && (
+              <div 
+                onClick={abrirModalAdicionarProduto}
+                className="bg-white rounded-2xl border-2 border-dashed border-slate-300 p-6 flex flex-col items-center justify-center cursor-pointer hover:border-indigo-500 hover:bg-indigo-50 transition-colors min-h-[300px] shadow-sm group"
+              >
+                <div className="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-4xl mb-4 group-hover:scale-110 transition-transform">
+                  +
+                </div>
+                <h3 className="text-lg font-bold text-slate-700 text-center">Adicionar Novo<br/>Produto</h3>
+              </div>
+            )}
+            {/* 👆 FIM DO CARTÃO DE ADICIONAR PRODUTO 👆 */}
+
           </div>
         )}
 
